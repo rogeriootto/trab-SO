@@ -18,6 +18,10 @@ int patientHP[NUM_PATIENTS];
 int activeThreads[NUM_PATIENTS];
 int isConsulting[NUM_PATIENTS];
 
+int curedPatients = 0;
+int deadPatients = 0;
+int totalOfPatients = 0;
+
 void* doctor(void* arg){
     int thread_id = *(int*)arg;
     int consultTime;
@@ -25,27 +29,33 @@ void* doctor(void* arg){
     int isStillWorking = 0;
     int menor;
     int menorId;
+    int firstPatient = 0;
 
     while(1) {
-        if(activePatients == 16){
+        if(activePatients > 0 || firstPatient == 0){
             if(!isStillWorking){
                 maxConsultTime = rand() % (6 - 2) + 2;
                 menor = 192179877;
                 for(int i = 0; i < NUM_PATIENTS; i++){
                     if(menor > patientHP[i]){
-                        menor = patientHP[i];
-                        menorId = i;
+                        if(activeThreads[i]){
+                            menor = patientHP[i];
+                            menorId = i;
+                        }
                     }
                 }
 
                 isConsulting[menorId] = 1;
                 printf("\n\nMEDICO COMEÇOU CONSULTA COM PACIENTE %d de %d turnos\n\n", menorId, maxConsultTime);
                 isStillWorking = 1;
-
+                if(firstPatient==0){
+                    firstPatient = 1;
+                }
             }
             else {
                 if(consultTime == maxConsultTime){
-                    printf("\n\nMEDICO DEU ALTA PARA O PACIENTE %d\n\n", menorId);
+                    printf("\n\nMEDICO DEU ALTA PARA O PACIENTE %d\n", menorId);
+                    printf("PACIENTES ESPERANDO:  %d\n\n", activePatients-1);
                     consultTime = 0;
                     isConsulting[menorId] = 0;
                     isStillWorking = 0;
@@ -55,9 +65,11 @@ void* doctor(void* arg){
                     consultTime++;
                 }
             }
+        }else{
+            break;
         }
 
-        sleep(10);
+        sleep(1);
         
     }
 
@@ -72,22 +84,24 @@ void* patient(void* arg){
     
     while(1){
         if(patientHP[thread_id] == 0){
-                printf("\n\n\x1b[31mPACIENTE %d MORREU\x1b[0m\n\n", thread_id);
-                activeThreads[thread_id] = 0;
-                activePatients--;
-                return 0;
-            }
+            printf("\n\n\x1b[31mPACIENTE %d MORREU\x1b[0m\n\n", thread_id);
+            deadPatients++;
+            activeThreads[thread_id] = 0;
+            activePatients--;
+            return 0;
+        }
         if(patientHP[thread_id] == 999){ //RECEBEU_ALTA
-                printf("\n\nPACIENTE %d RECEBEU ALTA\n\n", thread_id);
-                activeThreads[thread_id] = 0;
-                activePatients--;
-                return 0;
+            printf("\n\nPACIENTE %d RECEBEU ALTA\n\n", thread_id);
+            curedPatients++;
+            activeThreads[thread_id] = 0;
+            activePatients--;
+            return 0;
         }
 
         if(!isConsulting[thread_id]){
-            if(thread_id == 0){
-                printf("\n\nstatus dos nebulizadores:\n%d %d %d %d\n%d %d %d %d\n\n", nebulizadorState[0], nebulizadorState[1], nebulizadorState[2], nebulizadorState[3], nebulizadorLinkById[0], nebulizadorLinkById[1], nebulizadorLinkById[2], nebulizadorLinkById[3]);
-            }
+            // if(thread_id == 0){
+            //     printf("\n\nstatus dos nebulizadores:\n%d %d %d %d\n%d %d %d %d\n\n", nebulizadorState[0], nebulizadorState[1], nebulizadorState[2], nebulizadorState[3], nebulizadorLinkById[0], nebulizadorLinkById[1], nebulizadorLinkById[2], nebulizadorLinkById[3]);
+            // }
 
             for(int i = 0; i < 4; i++){
                 if(!isUsingNebulizador && nebulizadorState[i] == FREE){
@@ -114,20 +128,18 @@ void* patient(void* arg){
             }
             
             if(!isUsingNebulizador){
-                printf("Não foi a vez do %d\n", thread_id);
-                patientHP[thread_id] = patientHP[thread_id] - 1;
+                // printf("Não foi a vez do %d\n", thread_id);
+                patientHP[thread_id] -= (rand() % (2 - 1) + 1);
             }
         }
 
-        sleep(10);
+        sleep(1);
     }
 }
 
-
 void killThreads(pthread_t *threads){
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < NUM_PATIENTS + 1; i++) {
         pthread_join(threads[i], NULL);
-        activePatients--;
     }
     pthread_mutex_destroy(&mutex);
 }
@@ -139,6 +151,8 @@ int main(){
     int doctorThreadId = 16;
     int threads_ids[NUM_PATIENTS];
     int i;
+    time_t startTime = time(NULL);
+    int duracaoSegundos = 60;
 
     for(i = 0; i < 4; i++){ //inicializa os nebulizadores como livres sem vinculo
         nebulizadorState[i] = FREE;
@@ -152,7 +166,8 @@ int main(){
    
     pthread_mutex_init(&mutex, NULL);
     pthread_create(&threads[NUM_PATIENTS+1], NULL, doctor, &doctorThreadId);
-    while(1){
+
+    while((time(NULL) - startTime) < duracaoSegundos){
         if(activePatients < NUM_PATIENTS){
             for(int i = 0; i < NUM_PATIENTS; i++){
                 if(!activeThreads[i]){
@@ -160,6 +175,7 @@ int main(){
                     activeThreads[i] = 1;
                     activePatients++;
                     threads_ids[i] = i;
+                    totalOfPatients++;
                     pthread_create(&threads[i], NULL, patient, &threads_ids[i]);
                     numPatients++;
                     break;
@@ -168,5 +184,15 @@ int main(){
         }
     }
 
-    killThreads(threads);
+    while(1){
+        if(activePatients <= 0){
+            printf("\n\n--------------------------------------------\n");
+            printf("Total de Pacientes curados: %d\n", curedPatients);
+            printf("Total de Pacientes mortos: %d\n", deadPatients);
+            printf("Total de Pacientes que chegaram no hospital: %d", totalOfPatients);
+            printf("\n--------------------------------------------\n");
+            killThreads(threads);
+            return 0;
+        }
+    }
 }
